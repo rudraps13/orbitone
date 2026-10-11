@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A one-tap space game. Fling a spark of light between sleeping planets. Every world you wake plays a note.">
+<title>Orbitone</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23090716'/%3E%3Ccircle cx='20' cy='20' r='8' fill='%23ff7ab6'/%3E%3Ccircle cx='20' cy='20' r='14' fill='none' stroke='%237fe3ff' stroke-width='1.5' stroke-dasharray='3 3'/%3E%3Ccircle cx='32' cy='14' r='3' fill='%23fff3c4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;800&family=Sora:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: full-screen deep space painted on canvas; a slim HUD floats on top; cards sit centred. Single night-space look by choice. */
+:root{
+  color-scheme: dark;
+  --space:#07060f; --glass:rgba(14,11,30,.62); --text:#f4f0ff; --soft:rgba(244,240,255,.66);
+  --spark:#fff3c4; --pink:#ff7ab6; --cyan:#7fe3ff;
+  --display:"Syne", "Trebuchet MS", system-ui, sans-serif;
+  --body:"Sora", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--space);color:var(--text);font-family:var(--body);overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;width:100%;height:100%;cursor:pointer}
+.hud{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 0;display:flex;gap:26px;align-items:flex-start;pointer-events:none}
+.stat .k{display:block;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--soft)}
+.stat .v{font-family:var(--display);font-weight:800;font-size:32px;line-height:1.05;font-variant-numeric:tabular-nums}
+.combo .v{color:var(--spark)}
+.mute{margin-left:auto;pointer-events:auto;background:var(--glass);border:1px solid rgba(244,240,255,.18);color:var(--text);border-radius:999px;padding:7px 14px;font:600 12px var(--body);cursor:pointer}
+.hint{position:fixed;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 22px);text-align:center;font-size:15px;color:var(--soft);pointer-events:none;padding-inline:16px}
+.card{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(5,4,12,.35)}
+.card[hidden]{display:none}
+.card .in{max-width:430px;width:100%;text-align:center;background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(244,240,255,.15);border-radius:18px;padding:30px 24px;box-shadow:0 24px 70px rgba(0,0,0,.5)}
+.card h1{font-family:var(--display);font-weight:800;font-size:clamp(44px,12vw,64px);line-height:1;margin:0 0 14px;letter-spacing:-.01em;background:linear-gradient(90deg,var(--cyan),var(--pink) 60%,var(--spark));-webkit-background-clip:text;background-clip:text;color:transparent}
+.card p{margin:0 0 10px;line-height:1.55;color:var(--soft)}
+.card p b{color:var(--text)}
+.card .row{display:flex;justify-content:center;gap:28px;margin:12px 0 8px}
+.card .row b{display:block;font-family:var(--display);font-weight:800;font-size:44px;line-height:1}
+.card .row span{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--soft)}
+.btn{margin-top:14px;background:linear-gradient(90deg,var(--cyan),var(--pink));color:#120a20;border:0;border-radius:999px;padding:13px 30px;font:600 15px var(--body);cursor:pointer}
+.btn:focus-visible,.mute:focus-visible{outline:2px solid var(--text);outline-offset:3px}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Deep space with sleeping planets"></canvas>
+<div class="hud">
+  <div class="stat"><span class="k">Score</span><span class="v" id="score">0</span></div>
+  <div class="stat combo"><span class="k">Combo</span><span class="v" id="combo">×1</span></div>
+  <div class="stat"><span class="k">Best</span><span class="v" id="best">0</span></div>
+  <button class="mute" id="mute" type="button">Sound on</button>
+</div>
+<div class="hint" id="hint"></div>
+<div class="card" id="card"></div>
+
+<script>
+/* ---------- canvas ---------- */
+const cv=document.getElementById('c'), ctx=cv.getContext('2d');
+const nebC=document.createElement('canvas'), nb=nebC.getContext('2d');
+let W,H,D,SC;
+function resize(){
+  D=Math.min(devicePixelRatio||1,2); W=innerWidth; H=innerHeight; SC=Math.max(.75,Math.min(1.25,Math.min(W,H)/720));
+  cv.width=W*D; cv.height=H*D; ctx.setTransform(D,0,0,D,0,0);
+  nebC.width=W*D; nebC.height=H*D; nb.setTransform(D,0,0,D,0,0); paintNebula();
+}
+function paintNebula(){
+  nb.fillStyle='#07060f'; nb.fillRect(0,0,W,H);
+  const cols=['rgba(120,60,200,.20)','rgba(40,140,200,.16)','rgba(220,70,150,.14)','rgba(60,40,140,.22)'];
+  for(let i=0;i<14;i++){
+    const x=Math.random()*W, y=Math.random()*H, r=(120+Math.random()*260)*SC;
+    const g=nb.createRadialGradient(x,y,0,x,y,r); g.addColorStop(0,cols[i%4]); g.addColorStop(1,'rgba(0,0,0,0)');
+    nb.fillStyle=g; nb.fillRect(0,0,W,H);
+  }
+}
+addEventListener('resize',()=>{ resize(); });
+resize();
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const stars=[0,1,2].map(l=>Array.from({length:70},()=>({x:Math.random(),y:Math.random(),r:(.4+Math.random()*(l*.6+.5)),t:Math.random()*6})));
+
+/* ---------- sound ---------- */
+let AC=null, master=null, echo=null, muted=false; try{muted=localStorage.getItem('orbitone-muted')==='1';}catch(e){}
+function audio(){
+  if(AC) return; try{
+    AC=new (window.AudioContext||window.webkitAudioContext)();
+    master=AC.createGain(); master.gain.value=muted?0:.8; master.connect(AC.destination);
+    // echo send for the notes
+    echo=AC.createDelay(1); echo.delayTime.value=.32; const fb=AC.createGain(); fb.gain.value=.38; const lp=AC.createBiquadFilter(); lp.frequency.value=2600;
+    echo.connect(lp); lp.connect(fb); fb.connect(echo); lp.connect(master);
+    // soft space pad
+    const pf=AC.createBiquadFilter(); pf.type='lowpass'; pf.frequency.value=420; const pg=AC.createGain(); pg.gain.value=.028;
+    [110,110.6,164.8].forEach(f=>{ const o=AC.createOscillator(); o.type='sawtooth'; o.frequency.value=f; o.connect(pf); o.start(); });
+    const lfo=AC.createOscillator(); lfo.frequency.value=.07; const lg=AC.createGain(); lg.gain.value=180; lfo.connect(lg); lg.connect(pf.frequency); lfo.start();
+    pf.connect(pg); pg.connect(master);
+  }catch(e){ AC=null; }
+}
+function note(freq,gain,dur){
+  if(!AC) return; const n=AC.currentTime;
+  for(const [mult,type,g] of [[1,'triangle',1],[2,'sine',.35]]){
+    const o=AC.createOscillator(), e=AC.createGain(); o.type=type; o.frequency.value=freq*mult;
+    e.gain.setValueAtTime(.0001,n); e.gain.exponentialRampToValueAtTime(gain*g,n+.008); e.gain.exponentialRampToValueAtTime(.0001,n+dur);
+    o.connect(e); e.connect(master); e.connect(echo); o.start(n); o.stop(n+dur+.05);
+  }
+}
+function noise(dur,f0,f1,gain){
+  if(!AC) return; const n=AC.currentTime, b=AC.createBuffer(1,Math.floor(AC.sampleRate*dur),AC.sampleRate), d=b.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+  const s=AC.createBufferSource(); s.buffer=b; const f=AC.createBiquadFilter(); f.type='bandpass'; f.Q.value=.8;
+  f.frequency.setValueAtTime(f0,n); f.frequency.exponentialRampToValueAtTime(f1,n+dur);
+  const g=AC.createGain(); g.gain.setValueAtTime(gain,n); g.gain.exponentialRampToValueAtTime(.0001,n+dur);
+  s.connect(f); f.connect(g); g.connect(master); s.start(n);
+}
+const SCALE=[0,2,4,7,9];
+const pitch=k=>220*Math.pow(2,(SCALE[k%5]+12*Math.floor(k/5))/12);
+const sfx={
+  launch(){ noise(.25,500,2400,.12); },
+  wake(k,perfect){ note(pitch(k),.16,1.4); if(perfect) note(pitch(k+2),.08,1.6); },
+  dust(){ if(!AC) return; note(1800+Math.random()*900,.035,.18); },
+  lose(){ note(196,.14,1.2); setTimeout(()=>note(147,.14,1.6),180); noise(.6,900,120,.18); },
+  best(){ [0,2,4,5,7].forEach((k,i)=>setTimeout(()=>note(pitch(k+5),.1,1.2),i*110)); },
+};
+function setMute(m){ muted=m; if(master) master.gain.value=m?0:.8; document.getElementById('mute').textContent=m?'Sound off':'Sound on'; try{localStorage.setItem('orbitone-muted',m?'1':'0');}catch(e){} }
+document.getElementById('mute').addEventListener('click',e=>{ e.stopPropagation(); audio(); setMute(!muted); });
+setMute(muted);
+
+/* ---------- world ---------- */
+const HUES=[330,190,45,270,150,15,210,100];
+let G=null, best=0; try{best=+localStorage.getItem('orbitone-best')||0;}catch(e){}
+function newPlanet(prev,i){
+  const gap=(185+Math.random()*80+Math.min(i*3,90))*SC, margin=70*SC;
+  const x=prev?Math.max(margin,Math.min(W-margin,prev.x+(Math.random()-.5)*W*.75)):W/2;
+  const r=(Math.max(13,30-i*.25)-Math.random()*8)*SC;
+  const moving=i>8 && Math.random()<Math.min(.55,i*.03);
+  return {x0:x,x,y:prev?prev.y-gap:0,r,orb:r+30*SC,awake:!prev,wakeT:prev?0:1,hue:HUES[i%HUES.length],i,
+    move:moving?(30+Math.random()*50)*SC:0,ph:Math.random()*6,ms:.5+Math.random()*.7,moonA:Math.random()*6,ring:Math.random()<.35};
+}
+function newGame(){
+  G={planets:[],dust:[],fx:[],waves:[],trail:[],score:0,combo:1,cur:0,ang:Math.PI/2,dir:1,mode:'orbit',
+     x:0,y:0,vx:0,vy:0,flyT:0,turned:0,cam:0,shake:0,flash:0,over:false,t:0};
+  let p=newPlanet(null,0); G.planets.push(p);
+  for(let i=1;i<8;i++){ p=newPlanet(p,i); G.planets.push(p); addDust(G.planets[i-1],p); }
+  G.cam=G.planets[0].y-H*.68; hud();
+  hint('Tap when the dotted line points at the next planet');
+}
+function addDust(a,b){ const n=2+Math.floor(Math.random()*3); for(let k=1;k<=n;k++){ const f=k/(n+1); G.dust.push({x:a.x0+(b.x0-a.x0)*f+(Math.random()-.5)*60*SC,y:a.y+(b.y-a.y)*f,t:Math.random()*6}); } }
+function hud(){
+  document.getElementById('score').textContent=G?G.score:0;
+  document.getElementById('combo').textContent='×'+(G?G.combo:1);
+  document.getElementById('best').textContent=best;
+}
+function hint(s){ document.getElementById('hint').textContent=s; }
+
+function tap(){
+  audio();
+  if(!G||G.over||G.mode!=='orbit') return;
+  const p=G.planets[G.cur], sp=(430+Math.min(G.score*3,180))*SC;
+  G.vx=-Math.sin(G.ang)*G.dir*sp; G.vy=Math.cos(G.ang)*G.dir*sp;
+  G.mode='fly'; G.flyT=0; G.turned=0; sfx.launch(); hint('');
+}
+
+function update(dt){
+  G.t+=dt;
+  for(const p of G.planets){ if(p.move) p.x=p.x0+Math.sin(G.t*p.ms+p.ph)*p.move; p.moonA+=dt*1.4; if(p.awake&&p.wakeT<1) p.wakeT=Math.min(1,p.wakeT+dt*1.8); }
+  const cur=G.planets[G.cur];
+  if(G.mode==='orbit'){
+    const w=(2.1+Math.min(G.score*.035,1.3));
+    G.ang+=G.dir*w*dt; G.x=cur.x+Math.cos(G.ang)*cur.orb; G.y=cur.y+Math.sin(G.ang)*cur.orb;
+  } else {
+    G.flyT+=dt;
+    const sp=Math.hypot(G.vx,G.vy);
+    // gentle pull from planets ahead makes near misses forgiving
+    for(let i=G.cur+1;i<G.planets.length;i++){
+      const p=G.planets[i], dx=p.x-G.x, dy=p.y-G.y, d=Math.hypot(dx,dy), reach=p.orb*2.7;
+      if(d<reach){
+        const a=1900*SC*(1-d/reach); const nvx=G.vx+dx/d*a*dt, nvy=G.vy+dy/d*a*dt, k=sp/Math.hypot(nvx,nvy);
+        const before=Math.atan2(G.vy,G.vx); G.vx=nvx*k; G.vy=nvy*k; G.turned+=Math.abs(Math.atan2(Math.sin(Math.atan2(G.vy,G.vx)-before),Math.cos(Math.atan2(G.vy,G.vx)-before)));
+      }
+      if(d<=p.orb+2){ capture(i); break; }
+    }
+    G.x+=G.vx*dt; G.y+=G.vy*dt;
+    // stardust
+    for(const s of G.dust){ if(!s.got && Math.hypot(s.x-G.x,s.y-G.y)<20*SC){ s.got=true; G.score++; burst(s.x,s.y,48,10,.6); sfx.dust(); hud(); } }
+    const sy=G.y-G.cam;
+    if(G.mode==='fly' && (G.x<-50||G.x>W+50||sy>H+50||sy<-120||G.flyT>2.6)) lose();
+  }
+  // trail
+  G.trail.push({x:G.x,y:G.y}); if(G.trail.length>34) G.trail.shift();
+  // camera
+  const target=(G.mode==='fly'?Math.min(cur.y,G.y+H*.1):cur.y)-H*.68;
+  G.cam+=(target-G.cam)*Math.min(1,dt*3);
+  // effects
+  for(const f of G.fx){ f.x+=f.vx*dt; f.y+=f.vy*dt; f.vx*=.97; f.vy*=.97; f.life-=dt; }
+  G.fx=G.fx.filter(f=>f.life>0);
+  for(const w of G.waves){ w.r+=w.sp*dt; w.life-=dt*1.4; }
+  G.waves=G.waves.filter(w=>w.life>0);
+  G.shake=Math.max(0,G.shake-dt*3); G.flash=Math.max(0,G.flash-dt*2.5);
+  for(const s of G.dust) s.t+=dt;
+  // keep the world going upward
+  const top=G.planets[G.planets.length-1];
+  if(top.y>G.cam-H){ const p=newPlanet(top,top.i+1); G.planets.push(p); addDust(top,p); }
+  const here=G.planets[G.cur];
+  G.planets=G.planets.filter((p,i)=>p.y<G.cam+H*2||i>=G.cur);
+  G.cur=G.planets.indexOf(here);
+  G.dust=G.dust.filter(s=>s.y<G.cam+H*1.5);
+}
+function capture(i){
+  const p=G.planets[i], rx=G.x-p.x, ry=G.y-p.y;
+  G.dir=(rx*G.vy-ry*G.vx)>0?1:-1; G.ang=Math.atan2(ry,rx); G.mode='orbit';
+  const fresh=!p.awake, perfect=G.turned<.18;
+  if(fresh){
+    p.awake=true; p.wakeT=0;
+    G.combo=perfect?Math.min(G.combo+1,8):1;
+    const pts=1+(perfect?G.combo:0);
+    G.score+=pts; hud();
+    sfx.wake(G.score%15,perfect);
+    burst(p.x,p.y,p.hue,perfect?46:30,1.2);
+    G.waves.push({x:p.x,y:p.y,r:p.r,sp:340*SC,life:1,hue:p.hue});
+    if(perfect){ G.waves.push({x:p.x,y:p.y,r:p.r,sp:520*SC,life:1,hue:48}); G.flash=.35; pop(p.x,p.y-p.orb-16,'Perfect ×'+G.combo); }
+    G.shake=reduce?0:(perfect?.5:.3);
+  }
+  // remember where we are
+  for(let k=0;k<i;k++) G.planets[k].passed=true;
+  G.cur=i;
+}
+function burst(x,y,hue,n,pw){ if(reduce) n=Math.min(n,6); for(let k=0;k<n;k++){ const a=Math.random()*Math.PI*2, s=(60+Math.random()*260)*pw*SC; G.fx.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.6+Math.random()*.7,hue}); } }
+const pops=[];
+function pop(x,y,text){ pops.push({x,y,text,life:1.2}); }
+function lose(){
+  G.over=true; burst(G.x,G.y,0,40,1.4); G.shake=reduce?0:.6; sfx.lose();
+  let rec=false; if(G.score>best){ best=G.score; rec=true; try{localStorage.setItem('orbitone-best',best);}catch(e){} }
+  hud(); hint('');
+  setTimeout(()=>{ if(rec) sfx.best();
+    const woke=G.planets.filter(p=>p.awake).length;
+    card(`<h1>${rec?'New best':'Lost in space'}</h1>
+      <div class="row"><div><b>${G.score}</b><span>score</span></div><div><b>${best}</b><span>best</span></div></div>
+      <p>${rec?'Your song is the longest yet.':'The spark drifted into the dark.'}</p>
+      <button class="btn" id="go">Fly again</button>`); },900);
+}
+
+/* ---------- drawing ---------- */
+function draw(now){
+  const t=now/1000;
+  ctx.setTransform(D,0,0,D,0,0);
+  const cam=G?G.cam:0;
+  // nebula, slowly scrolling
+  const ny=((-cam*.08)%H+H)%H;
+  ctx.drawImage(nebC,0,ny-H,W,H); ctx.drawImage(nebC,0,ny,W,H);
+  // stars in three depths
+  stars.forEach((layer,l)=>{ const par=.15+l*.25;
+    for(const s of layer){ const y=((s.y*H-cam*par)%H+H)%H; ctx.globalAlpha=.35+.5*Math.sin(t*(1+l)+s.t)**2; ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(s.x*W,y,s.r,0,7); ctx.fill(); } });
+  ctx.globalAlpha=1;
+  if(!G){ return; }
+  const sh=G.shake*8; ctx.translate((Math.random()-.5)*sh,(Math.random()-.5)*sh-cam);
+  // capture rings of the planets ahead
+  for(let i=G.cur+1;i<G.planets.length;i++){ const p=G.planets[i]; if(p.awake) continue;
+    ctx.strokeStyle=`hsla(${p.hue},90%,75%,.22)`; ctx.setLineDash([3,6]); ctx.lineWidth=1.2; ctx.beginPath(); ctx.arc(p.x,p.y,p.orb,0,7); ctx.stroke(); ctx.setLineDash([]); }
+  // shockwaves
+  ctx.globalCompositeOperation='lighter';
+  for(const w of G.waves){ ctx.strokeStyle=`hsla(${w.hue},100%,70%,${w.life*.6})`; ctx.lineWidth=3*w.life+1; ctx.beginPath(); ctx.arc(w.x,w.y,w.r,0,7); ctx.stroke(); }
+  ctx.globalCompositeOperation='source-over';
+  // planets
+  for(const p of G.planets) drawPlanet(p,t);
+  // stardust
+  for(const s of G.dust){ if(s.got) continue; const k=4+Math.sin(s.t*4)*1.2;
+    ctx.save(); ctx.translate(s.x,s.y); ctx.rotate(s.t);
+    ctx.globalCompositeOperation='lighter'; ctx.fillStyle='rgba(255,220,120,.25)'; ctx.beginPath(); ctx.arc(0,0,k*2.4,0,7); ctx.fill();
+    ctx.fillStyle='#ffe9a8'; ctx.beginPath(); ctx.moveTo(0,-k); ctx.lineTo(k*.5,0); ctx.lineTo(0,k); ctx.lineTo(-k*.5,0); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  ctx.globalCompositeOperation='source-over';
+  // aim guide
+  if(G.mode==='orbit' && !G.over){
+    const tx=-Math.sin(G.ang)*G.dir, ty=Math.cos(G.ang)*G.dir;
+    ctx.strokeStyle='rgba(255,243,196,.45)'; ctx.setLineDash([2,7]); ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(G.x,G.y); ctx.lineTo(G.x+tx*170*SC,G.y+ty*170*SC); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // trail and spark
+  if(!G.over){
+    ctx.globalCompositeOperation='lighter';
+    for(let i=1;i<G.trail.length;i++){ const a=i/G.trail.length, p0=G.trail[i-1], p1=G.trail[i];
+      ctx.strokeStyle=`rgba(255,${180+a*60},${150+a*80},${a*.8})`; ctx.lineWidth=a*7*SC; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y); ctx.stroke(); }
+    const gl=ctx.createRadialGradient(G.x,G.y,0,G.x,G.y,26*SC); gl.addColorStop(0,'rgba(255,243,196,.9)'); gl.addColorStop(1,'rgba(255,160,120,0)');
+    ctx.fillStyle=gl; ctx.beginPath(); ctx.arc(G.x,G.y,26*SC,0,7); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(G.x,G.y,4*SC,0,7); ctx.fill();
+    ctx.globalCompositeOperation='source-over';
+  }
+  // particles
+  ctx.globalCompositeOperation='lighter';
+  for(const f of G.fx){ ctx.fillStyle=f.hue?`hsla(${f.hue},100%,70%,${f.life})`:`rgba(255,240,220,${f.life})`; ctx.beginPath(); ctx.arc(f.x,f.y,2.2*SC,0,7); ctx.fill(); }
+  ctx.globalCompositeOperation='source-over';
+  // floating words
+  for(let i=pops.length-1;i>=0;i--){ const p=pops[i]; p.life-=1/60; p.y-=.6; if(p.life<=0){ pops.splice(i,1); continue; }
+    ctx.globalAlpha=Math.min(1,p.life); ctx.font=`800 ${Math.round(22*SC)}px Syne, sans-serif`; ctx.textAlign='center'; ctx.fillStyle='#fff3c4'; ctx.fillText(p.text,p.x,p.y); }
+  ctx.globalAlpha=1;
+  ctx.setTransform(D,0,0,D,0,0);
+  if(G.flash>0){ ctx.fillStyle=`rgba(255,240,210,${G.flash*.35})`; ctx.fillRect(0,0,W,H); }
+}
+function drawPlanet(p,t){
+  const w=p.awake?p.wakeT:0, s=1+(p.awake?Math.sin(Math.min(1,w)*Math.PI)*.18:0), r=p.r*s;
+  if(w>0){ // atmosphere glow
+    ctx.globalCompositeOperation='lighter';
+    const g=ctx.createRadialGradient(p.x,p.y,r*.6,p.x,p.y,r*2.6); g.addColorStop(0,`hsla(${p.hue},100%,65%,${.45*w})`); g.addColorStop(1,'hsla(0,0%,0%,0)');
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.x,p.y,r*2.6,0,7); ctx.fill(); ctx.globalCompositeOperation='source-over';
+  }
+  // body: grey when asleep, full colour when awake
+  const b=ctx.createRadialGradient(p.x-r*.35,p.y-r*.35,r*.1,p.x,p.y,r);
+  b.addColorStop(0,`hsl(${p.hue},${10+80*w}%,${30+38*w}%)`); b.addColorStop(1,`hsl(${p.hue},${10+60*w}%,${10+22*w}%)`);
+  ctx.fillStyle=b; ctx.beginPath(); ctx.arc(p.x,p.y,r,0,7); ctx.fill();
+  // bands
+  ctx.save(); ctx.beginPath(); ctx.arc(p.x,p.y,r,0,7); ctx.clip();
+  ctx.strokeStyle=`hsla(${p.hue+30},80%,${70}%,${.08+.22*w})`; ctx.lineWidth=r*.18;
+  for(let k=-1;k<=1;k++){ ctx.beginPath(); ctx.ellipse(p.x,p.y+k*r*.42,r*1.2,r*.12,0,0,7); ctx.stroke(); }
+  ctx.restore();
+  if(!p.awake){ ctx.strokeStyle='rgba(255,255,255,.14)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(p.x,p.y,r,0,7); ctx.stroke(); }
+  if(p.ring){ ctx.strokeStyle=`hsla(${p.hue+60},70%,80%,${.15+.45*w})`; ctx.lineWidth=2; ctx.beginPath(); ctx.ellipse(p.x,p.y,r*1.75,r*.45,-.35,0,7); ctx.stroke(); }
+  if(w>0){ const mx=p.x+Math.cos(p.moonA)*r*1.6, my=p.y+Math.sin(p.moonA)*r*.7; ctx.fillStyle=`rgba(255,250,235,${w})`; ctx.beginPath(); ctx.arc(mx,my,2.6*SC,0,7); ctx.fill(); }
+}
+
+/* ---------- loop, cards, input ---------- */
+let last=performance.now();
+function loop(now){ const dt=Math.min(.05,(now-last)/1000); last=now; if(G&&!G.over) update(dt); else if(G) { for(const f of G.fx){f.x+=f.vx*dt;f.y+=f.vy*dt;f.life-=dt;} G.fx=G.fx.filter(f=>f.life>0); G.shake=Math.max(0,G.shake-dt*3); } draw(now); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+
+function card(html){ const c=document.getElementById('card'); c.innerHTML=`<div class="in">${html}</div>`; c.hidden=false; const b=c.querySelector('button'); if(b) b.focus(); }
+const onCard=()=>!document.getElementById('card').hidden;
+card(`<h1>Orbitone</h1>
+  <p>You are a spark of light circling a planet. Every planet above you is asleep.</p>
+  <p><b>Tap</b> to let go. Fly to the next planet and it wakes up in colour and plays a note. Wake enough of them and you’re playing a song.</p>
+  <p>Fly straight in without curving for a <b>Perfect</b> and a bigger combo. Grab the gold stardust on the way.</p>
+  <button class="btn" id="go">Start orbiting</button>`);
+document.getElementById('card').addEventListener('click',e=>{ if(e.target.id==='go'){ e.stopPropagation(); audio(); document.getElementById('card').hidden=true; pops.length=0; newGame(); } });
+cv.addEventListener('pointerdown',e=>{ if(onCard()) return; e.preventDefault(); tap(); });
+addEventListener('keydown',e=>{ if(e.repeat) return; if((e.code==='Space'||e.code==='Enter') && !onCard() && e.target.tagName!=='BUTTON'){ e.preventDefault(); tap(); } });
+document.addEventListener('visibilitychange',()=>{ last=performance.now(); });
+hud();
+</script>
+</body>
+</html>

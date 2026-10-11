@@ -1,0 +1,51 @@
+ORBITONE - HOW TO PLAY
+======================
+
+Double-click the "Orbitone" icon on your desktop.
+Click "Start orbiting".
+
+
+THE IDEA
+--------
+You are a little spark of light, circling a planet.
+The planets above you are asleep (grey).
+Fly to them to wake them up. Each one bursts into colour and plays
+a musical note, so the further you go, the longer your song.
+
+
+CONTROL - JUST ONE
+------------------
+TAP (mouse click, touch, or SPACE bar) to let go of the planet.
+
+- While you circle, a DOTTED LINE shows the way you'll fly.
+- Wait until the dotted line points at the next planet.
+- TAP. You fly in a straight line.
+- Reach the dotted ring around the next planet and you start
+  circling it.
+
+
+SCORE
+-----
++1           for each planet you wake up
+PERFECT      fly straight in without the planet pulling you sideways.
+             Your combo goes up (x2, x3 ... up to x8) and you get
+             bonus points. Missing a perfect resets the combo to x1.
++1           for each gold stardust diamond you fly through
+
+
+GAME OVER
+---------
+If you miss and fly off into space, the game ends.
+Your best score is saved.
+
+
+TIPS
+----
+- Don't rush. The spark keeps circling, so you can wait for the
+  perfect moment.
+- Planets gently PULL you in, so you don't have to be exact.
+- Later planets are smaller, further apart, and some MOVE side to
+  side. Watch them before you tap.
+- Turn the sound ON. Every planet plays a note, and it sounds
+  better the longer you last.
+- The "Sound on / Sound off" button is at the top right.
